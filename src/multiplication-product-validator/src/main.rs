@@ -8,9 +8,6 @@ fn main() {
         return;
     }
 
-    // 2. You are going to count how many digits the number the user entered has.
-    let num_digits: usize = args[1].trim().len();
-
     let number: u64 = match args[1].trim().parse() {
         Ok(n) if n > 0 => n,
         _ => {
@@ -19,41 +16,25 @@ fn main() {
         }
     };
 
-    // 3. Then do all the two-factor multiplications until the number of digits in the number plus one is complete.
+    // 2. Then do all the two-factor multiplications until the number of digits in the number plus one is complete.
     let mut multiplications: Vec<(u64, u64)> = Vec::new();
-    let limit: u64 = 10u64.pow(num_digits as u32 + 1) - 1;
-    println!("Limit: {}", limit);
-    // return;
+    let limit: u64 = (number as f64).sqrt() as u64;
 
-    let mut multiplier: u64 = 0u64;
-    loop {
-        // 3.1. The multiplicand starts from the same number as the multiplier.
-        let mut multiplicand: u64 = multiplier;
-        loop {
-            let product: u128 = multiplier as u128 * multiplicand as u128;
-
-            // 3.2. Whenever the result is equal to what the user passed through the CLI, then those multiplications are saved in an array.
-            if product == number as u128 {
-                multiplications.push((multiplier, multiplicand));
-            }
-
-            multiplicand += 1;
-            if multiplicand > limit {
-                // println!("- {} x {}", multiplier, multiplicand);
-                break;
-            }
-        }
-
-        multiplier += 1;
-        if multiplier > limit {
-            // println!("+ {} x {}", multiplier, multiplicand);
-            break;
+    for multiplier in 1..=limit {
+        if number % multiplier == 0 {
+            let multiplicand: u64 = number / multiplier;
+            multiplications.push((multiplier, multiplicand));
         }
     }
 
-    // 4. These multiplications are displayed on the screen.
-    println!("Found the following multiplications for {}:", number);
+    // 3. These multiplications are displayed on the screen.
+    println!(
+        "Found {} multiplications for the product {}. The limit was {}.",
+        &multiplications.len(),
+        number,
+        limit
+    );
     for (a, b) in &multiplications {
-        println!("= {} * {} = {}", a, b, a * b);
+        println!("{} * {} = {}", a, b, a * b);
     }
 }
