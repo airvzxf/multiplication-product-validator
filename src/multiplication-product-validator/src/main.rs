@@ -1,6 +1,8 @@
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelIterator;
 use std::env;
+use std::fs::File;
+use std::io::Write;
 
 fn main() {
     // 1. Allow the user to send an argument via the CLI; this must be a positive integer.
@@ -36,4 +38,23 @@ fn main() {
     for (a, b) in &multiplications {
         println!("{} * {} = {}", a, b, a * b);
     }
+
+    // 4. Generate the CSV file.
+    if let Err(e) = generate_csv(&multiplications, number) {
+        eprintln!("Error generating CSV file: {}", e);
+    }
+}
+
+fn generate_csv(multiplications: &[(u128, u128)], number: u128) -> std::io::Result<()> {
+    let file_name = format!("product_{}.csv", number);
+    let mut file = File::create(&file_name)?;
+
+    writeln!(file, "Multiplier,Multiplicand,Product")?;
+
+    for &(multiplier, multiplicand) in multiplications {
+        writeln!(file, "{},{},{}", multiplier, multiplicand, number)?;
+    }
+
+    println!("CSV file generated: {}", file_name);
+    Ok(())
 }
