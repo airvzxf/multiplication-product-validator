@@ -1,0 +1,282 @@
+name: Release
+
+# Release flow:
+#   1. Merge the release-plz PR (version bump + CHANGELOG.md).
+#   2. Sign and push the tag on that merge commit:
+#        git tag -s vX.Y.Z -m 'release: vX.Y.Z' && git push origin vX.Y.Z
+#   3. This workflow validates the tag, builds the binaries for every
+#      platform, attests their build provenance and publishes the GitHub
+#      Release with the CHANGELOG.md section as its notes.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.2.0). Must exist on the remote.'
+        required: true
+        type: string
+
+# Never run two releases of the same tag at once.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: multiplication-product-validator
+
+jobs:
+  validate-tag-input:
+    name: 'Validate · tag shape and Cargo.toml version'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Validate tag shape
+        id: resolve
+        env:
+          RAW: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RAW" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?)$ ]] \
+            || { echo "ERROR: '$RAW' is not vX.Y.Z[-prerelease]"; exit 1; }
+          echo "tag=${RAW}" >> "$GITHUB_OUTPUT"
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Tag matches the Cargo.toml version
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          CRATE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          [ "$CRATE_VERSION" = "$VERSION" ] || {
+            echo "ERROR: tag version ${VERSION} != Cargo.toml version ${CRATE_VERSION}"
+            echo "Merge the release-plz PR first, then tag its merge commit."
+            exit 1
+          }
+
+  # The tag must point at a commit on main, not at a branch tip.
+  verify-tag-reachability:
+    name: 'Verify · tag is reachable from main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: validate-tag-input
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-tag-input.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - env:
+          TAG: ${{ needs.validate-tag-input.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          TAG_COMMIT="$(git rev-parse "${TAG}^{commit}")"
+          if git merge-base --is-ancestor "${TAG_COMMIT}" origin/main; then
+            echo "✓ ${TAG} (${TAG_COMMIT}) is reachable from origin/main"
+            exit 0
+          fi
+          {
+            echo "ERROR: ${TAG} points at ${TAG_COMMIT}, which is not on origin/main."
+            echo "Fix: delete the tag and re-tag the merge commit on main:"
+            echo "  git tag -d ${TAG} && git push origin :refs/tags/${TAG}"
+            echo "  git tag -s ${TAG} -m 'release: ${TAG}' origin/main"
+            echo "  git push origin ${TAG}"
+          } >&2
+          exit 1
+
+  # The tag must be signed by a key listed in .github/trusted-signers.
+  # The allow-list is read from origin/main, not from the tagged tree, so
+  # removing a key on main revokes it for every later release.
+  verify-tag-signature:
+    name: 'Verify · tag is signed by a trusted signer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: validate-tag-input
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-tag-input.outputs.tag }}
+          persist-credentials: false
+
+      - name: Fetch the tag object and the allow-lists from origin/main
+        env:
+          TAG: ${{ needs.validate-tag-input.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main "+refs/tags/${TAG}:refs/tags/${TAG}"
+          mkdir -p "$RUNNER_TEMP/trusted"
+          git show origin/main:.github/trusted-signers > "$RUNNER_TEMP/trusted/allowed_signers" \
+            || { echo "ERROR: .github/trusted-signers missing on origin/main"; exit 1; }
+          test -s "$RUNNER_TEMP/trusted/allowed_signers" \
+            || { echo "ERROR: .github/trusted-signers is empty on origin/main"; exit 1; }
+          # Optional PGP allow-list, for PGP-signed tags.
+          git show origin/main:.github/trusted-signers.asc \
+            > "$RUNNER_TEMP/trusted/allowed_signers.asc" 2>/dev/null \
+            || rm -f "$RUNNER_TEMP/trusted/allowed_signers.asc"
+          git config gpg.ssh.allowedsignersfile "$RUNNER_TEMP/trusted/allowed_signers"
+
+      - name: Import the PGP allow-list if the tag is PGP-signed
+        env:
+          TAG: ${{ needs.validate-tag-input.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git cat-file tag "$TAG" | grep -q 'BEGIN PGP SIGNATURE'; then
+            test -f "$RUNNER_TEMP/trusted/allowed_signers.asc" \
+              || { echo "ERROR: PGP-signed tag but no .github/trusted-signers.asc on origin/main"; exit 1; }
+            gpg --batch --import "$RUNNER_TEMP/trusted/allowed_signers.asc"
+          fi
+
+      - name: Verify tag signature
+        env:
+          TAG: ${{ needs.validate-tag-input.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git verify-tag "${TAG}"; then
+            echo "✓ ${TAG} is signed by a trusted signer"
+            exit 0
+          fi
+          {
+            echo "ERROR: ${TAG} is unsigned or signed by a key not in .github/trusted-signers."
+            echo "Fix: re-create it with the maintainer's signing key:"
+            echo "  git tag -d ${TAG} && git push origin :refs/tags/${TAG}"
+            echo "  git tag -s ${TAG} -m 'release: ${TAG}' <commit>"
+            echo "  git push origin ${TAG}"
+          } >&2
+          exit 1
+
+  build:
+    name: 'Build · ${{ matrix.target }}'
+    needs: [validate-tag-input, verify-tag-reachability, verify-tag-signature]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, archive: tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-tag-input.outputs.tag }}
+          persist-credentials: false
+
+      # Same pinned toolchain as rust-toolchain.toml, for reproducible
+      # artifacts. No cache: release builds start cold on purpose.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.100.0
+          targets: ${{ matrix.target }}
+
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        env:
+          TAG: ${{ needs.validate-tag-input.outputs.tag }}
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          NAME="${BIN}-${TAG}-${TARGET}"
+          mkdir -p "dist/${NAME}"
+          EXE="${BIN}"
+          [ "$ARCHIVE" = zip ] && EXE="${BIN}.exe"
+          cp "target/${TARGET}/release/${EXE}" README.md LICENSE CHANGELOG.md "dist/${NAME}/"
+          cd dist
+          if [ "$ARCHIVE" = zip ]; then
+            7z a -tzip "${NAME}.zip" "${NAME}" >/dev/null
+          else
+            tar -czf "${NAME}.tar.gz" "${NAME}"
+          fi
+          rm -rf "${NAME}"
+          ls -la
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: 'Publish · GitHub Release'
+    needs: [validate-tag-input, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      # Build-provenance attestations (Sigstore, via OIDC).
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-tag-input.outputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum -b -- *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.validate-tag-input.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The section from "## [X.Y.Z]" up to the next "## [" heading.
+          awk -v v="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::warning::no CHANGELOG.md section for ${VERSION}; using generated notes only"
+          fi
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          name: ${{ needs.validate-tag-input.outputs.tag }}
+          tag_name: ${{ needs.validate-tag-input.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.validate-tag-input.outputs.version, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS

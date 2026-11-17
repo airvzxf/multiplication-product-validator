@@ -1,0 +1,12 @@
+# Pinned toolchain so local rustfmt and clippy match CI exactly.
+#
+# CI runs fmt-check, clippy and the release build on this channel.
+# The test, doc and build jobs override it with RUSTUP_TOOLCHAIN=stable
+# (and the msrv job with the `rust-version` from Cargo.toml) so newer
+# compilers and the declared minimum are both exercised.
+#
+# Bump the channel deliberately, in its own commit, together with the
+# `toolchain:` inputs in .github/workflows/ci.yml and release.yml.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
