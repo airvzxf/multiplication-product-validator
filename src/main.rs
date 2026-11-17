@@ -1,6 +1,7 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use multiplication_product_validator::{
-    FactorPair, default_threads, factor_pairs, init_thread_pool,
+    FactorPair, default_threads, factor_pairs_from, factor_pairs_trial, factorize,
+    format_factorization, init_thread_pool,
 };
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -25,6 +26,18 @@ struct Cli {
     /// Number of worker threads [default: logical cores minus one].
     #[arg(short = 'j', long, value_parser = clap::value_parser!(u16).range(1..))]
     threads: Option<u16>,
+
+    /// How to search for the factor pairs.
+    #[arg(long, value_enum, default_value_t = Method::Factorize)]
+    method: Method,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Method {
+    /// Prime factorization (Pollard's rho), then build the divisors.
+    Factorize,
+    /// Test every candidate up to the square root (slow; for comparison).
+    Trial,
 }
 
 fn parse_positive(value: &str) -> Result<u128, String> {
@@ -43,9 +56,13 @@ fn main() -> ExitCode {
         eprintln!("Error creating the thread pool: {e}");
         return ExitCode::FAILURE;
     }
-    let multiplications = factor_pairs(number);
+    let factors = factorize(number);
+    let multiplications = match cli.method {
+        Method::Factorize => factor_pairs_from(number, &factors),
+        Method::Trial => factor_pairs_trial(number),
+    };
 
-    if let Err(e) = print_pairs(&multiplications, number) {
+    if let Err(e) = print_pairs(&multiplications, number, &factors) {
         // A closed pipe (e.g. `| head`) is not an error worth reporting.
         if e.kind() != io::ErrorKind::BrokenPipe {
             eprintln!("Error writing to stdout: {e}");
@@ -66,12 +83,21 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn print_pairs(multiplications: &[FactorPair], number: u128) -> io::Result<()> {
+fn print_pairs(
+    multiplications: &[FactorPair],
+    number: u128,
+    factors: &[(u128, u32)],
+) -> io::Result<()> {
     let mut out = BufWriter::new(io::stdout().lock());
     writeln!(
         out,
         "Found {} multiplications for the product {number}.",
         multiplications.len()
+    )?;
+    writeln!(
+        out,
+        "Prime factorization: {}",
+        format_factorization(factors)
     )?;
     for (a, b) in multiplications {
         writeln!(out, "{a} * {b} = {number}")?;

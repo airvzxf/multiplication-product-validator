@@ -12,6 +12,7 @@ fn prints_pairs_for_twelve() {
     assert_eq!(
         stdout,
         "Found 3 multiplications for the product 12.\n\
+         Prime factorization: 2^2 * 3\n\
          1 * 12 = 12\n\
          2 * 6 = 12\n\
          3 * 4 = 12\n"
@@ -60,4 +61,32 @@ fn accepts_an_explicit_thread_count() {
 fn rejects_zero_threads() {
     let output = bin().args(["12", "--no-csv", "-j", "0"]).output().unwrap();
     assert!(!output.status.success());
+}
+
+#[test]
+fn both_methods_print_the_same_pairs() {
+    let run = |method: &str| {
+        let output = bin()
+            .args(["963761198400", "--no-csv", "--method", method])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        output.stdout
+    };
+    assert_eq!(run("factorize"), run("trial"));
+}
+
+#[test]
+fn handles_u128_max() {
+    let output = bin()
+        .args([&u128::MAX.to_string(), "--no-csv"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Found 256 multiplications"), "{stdout}");
+    assert!(
+        stdout.contains("Prime factorization: 3 * 5 * 17 * 257 * 641 * 65537"),
+        "{stdout}"
+    );
 }
