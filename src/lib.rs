@@ -6,6 +6,25 @@ use rayon::prelude::*;
 /// and `multiplier <= multiplicand`.
 pub type FactorPair = (u128, u128);
 
+/// Number of worker threads used when none is requested: every logical
+/// core except one, which stays free for the rest of the system.
+pub fn default_threads() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get().saturating_sub(1))
+        .max(1)
+}
+
+/// Configures the global rayon pool with `threads` workers.
+///
+/// Rayon splits the work into small batches and lets an idle worker steal
+/// pending batches from a busy one, so no core waits while work remains.
+/// Must be called before any parallel work starts.
+pub fn init_thread_pool(threads: usize) -> Result<(), rayon::ThreadPoolBuildError> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global()
+}
+
 /// Returns every factor pair of `n`, ordered by ascending multiplier.
 ///
 /// Each candidate multiplier in `1..=isqrt(n)` is tested in parallel.
@@ -24,6 +43,11 @@ pub fn factor_pairs(n: u128) -> Vec<FactorPair> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_threads_is_at_least_one() {
+        assert!(default_threads() >= 1);
+    }
 
     #[test]
     fn zero_has_no_pairs() {

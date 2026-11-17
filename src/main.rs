@@ -1,5 +1,7 @@
 use clap::Parser;
-use multiplication_product_validator::{FactorPair, factor_pairs};
+use multiplication_product_validator::{
+    FactorPair, default_threads, factor_pairs, init_thread_pool,
+};
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::process::ExitCode;
@@ -19,6 +21,10 @@ struct Cli {
     /// Do not write the CSV file.
     #[arg(long, conflicts_with = "name")]
     no_csv: bool,
+
+    /// Number of worker threads [default: logical cores minus one].
+    #[arg(short = 'j', long, value_parser = clap::value_parser!(u16).range(1..))]
+    threads: Option<u16>,
 }
 
 fn parse_positive(value: &str) -> Result<u128, String> {
@@ -32,6 +38,11 @@ fn parse_positive(value: &str) -> Result<u128, String> {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let number = cli.number;
+    let threads = cli.threads.map_or_else(default_threads, usize::from);
+    if let Err(e) = init_thread_pool(threads) {
+        eprintln!("Error creating the thread pool: {e}");
+        return ExitCode::FAILURE;
+    }
     let multiplications = factor_pairs(number);
 
     if let Err(e) = print_pairs(&multiplications, number) {

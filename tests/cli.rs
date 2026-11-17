@@ -44,3 +44,20 @@ fn writes_the_csv_file() {
          1,36,36\n2,18,36\n3,12,36\n4,9,36\n6,6,36\n"
     );
 }
+
+#[test]
+fn accepts_an_explicit_thread_count() {
+    let output = bin()
+        .args(["720720", "--no-csv", "-j", "2"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("Found 120 multiplications"), "{stdout}");
+}
+
+#[test]
+fn rejects_zero_threads() {
+    let output = bin().args(["12", "--no-csv", "-j", "0"]).output().unwrap();
+    assert!(!output.status.success());
+}
