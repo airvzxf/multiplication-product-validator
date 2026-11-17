@@ -1,0 +1,20 @@
+[package]
+name = "multiplication-product-validator"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Find every pair of two factors whose product is a given number."
+license = "AGPL-3.0-only"
+repository = "https://github.com/airvzxf/multiplication-product-validator"
+readme = "README.md"
+keywords = ["factorization", "divisors", "multiplication", "cli"]
+categories = ["command-line-utilities", "mathematics"]
+publish = false
+
+[dependencies]
+rayon = "1.12.0"
+clap = { version = "4.6.8", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

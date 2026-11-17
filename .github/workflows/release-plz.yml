@@ -1,0 +1,67 @@
+name: release-plz
+
+# Opens (or updates) a release PR that bumps the version in Cargo.toml and
+# adds the CHANGELOG.md entries derived from the Conventional Commits since
+# the last `vX.Y.Z` tag. It never tags or publishes; see release-plz.toml
+# and release.yml for the rest of the release flow.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-pr:
+    name: 'release-plz · release PR'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Do not run on forks.
+    if: github.repository_owner == 'airvzxf'
+    permissions:
+      contents: write
+      pull-requests: write
+      # Dispatches ci.yml on the release PR branch (see the last step).
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # release-plz reads the full history and the tags.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.100.0
+      - name: Run release-plz
+        id: release-plz
+        uses: MarcoIeni/release-plz-action@8e61445f0b34e7c6d985255f2f1f05a36eb350dc # v0.5.137
+        with:
+          command: release-pr
+          config: release-plz.toml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull requests opened with GITHUB_TOKEN do not trigger other
+      # workflows, so the release PR would never get the checks that the
+      # `protect-main` ruleset requires. A workflow_dispatch event is the
+      # exception to that rule: run ci.yml on the PR branch so its checks
+      # land on the PR head commit.
+      - name: Run CI on the release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          set -euo pipefail
+          BRANCH="$(jq -r '.head_branch // empty' <<<"${PR:-null}" 2>/dev/null || true)"
+          if [ -z "$BRANCH" ]; then
+            echo "No release PR opened or updated; nothing to check."
+            exit 0
+          fi
+          echo "Dispatching ci.yml on ${BRANCH}"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"

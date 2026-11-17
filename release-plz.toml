@@ -1,0 +1,23 @@
+# release-plz proposes releases: it opens a PR that bumps the version in
+# Cargo.toml and updates CHANGELOG.md from the Conventional Commits since
+# the last tag. Publishing stays manual: after merging that PR, sign and
+# push the tag (`git tag -s vX.Y.Z && git push origin vX.Y.Z`) and
+# .github/workflows/release.yml builds and publishes the GitHub Release.
+#
+# Schema: https://release-plz.ieni.dev/docs/config
+
+[workspace]
+# Never release without a human merging the release PR.
+release_always = false
+# The crate is not published to crates.io, so the previous version comes
+# from the latest `vX.Y.Z` git tag instead of the registry. With no tag
+# yet, the first release PR proposes the current Cargo.toml version.
+publish = false
+git_only = true
+# Tags must be signed by the maintainer (release.yml verifies them), so
+# release-plz neither creates tags nor GitHub Releases.
+git_tag_enable = false
+git_release_enable = false
+# Tag format used by release.yml.
+git_tag_name = "v{{ version }}"
+pr_name = "chore(release): v{{ version }}"

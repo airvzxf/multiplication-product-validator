@@ -1,98 +1,139 @@
 # Multiplication: Product Validator
 
-Given a number (the product), this application will find and display all the pairs of two factors that multiply to produce that number.
+[![ci](https://github.com/airvzxf/multiplication-product-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/airvzxf/multiplication-product-validator/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/airvzxf/multiplication-product-validator/actions/workflows/codeql.yml/badge.svg)](https://github.com/airvzxf/multiplication-product-validator/actions/workflows/codeql.yml)
+
+Given a number (the product), this application finds and displays every pair
+of two factors that multiply to produce that number, along with its prime
+factorization. It accepts any positive integer up to 2^128 − 1.
 
 ## For Users
 
-### What it does
+### Install
 
-This tool takes a single positive integer as an input and calculates all the unique pairs of two numbers (factors) that, when multiplied together, equal the input number. For example, if you input `12`, the program will output:
+Download the archive for your platform from the
+[Releases](https://github.com/airvzxf/multiplication-product-validator/releases)
+page, check it against `SHA256SUMS`, and optionally verify its build
+provenance:
+
+```bash
+gh attestation verify <archive> --repo airvzxf/multiplication-product-validator
+```
+
+Or build it from source with Rust 1.85 or newer
+([rustup.rs](https://rustup.rs/)):
+
+```bash
+cargo install --locked --git https://github.com/airvzxf/multiplication-product-validator
+```
+
+### Usage
+
+```bash
+multiplication-product-validator 12
+```
 
 ```
+Found 3 multiplications for the product 12.
+Prime factorization: 2^2 * 3
 1 * 12 = 12
 2 * 6 = 12
 3 * 4 = 12
+CSV file generated: product-validated.csv
 ```
 
-### How to use it
+| Option | Description |
+|---|---|
+| `--name <NAME>` | Name of the CSV file, without extension (default `product-validated`). |
+| `--no-csv` | Do not write the CSV file. |
+| `-j, --threads <N>` | Worker threads (default: logical cores minus one). |
+| `--method <METHOD>` | `factorize` (default) or `trial`. |
 
-1.  **Prerequisites:** You need to have Rust and Cargo installed on your system. If you don't have them, you can install them from [https://rustup.rs/](https://rustup.rs/).
-2.  **Navigate to the project directory:**
-    ```bash
-    cd src/multiplication-product-validator
-    ```
-3.  **Run the application:**
-    ```bash
-    cargo run <number>
-    ```
-    Replace `<number>` with the positive integer you want to find the factors for.
+The CSV file has the columns `Multiplier,Multiplicand,Product`.
 
-    **Example:**
-    ```bash
-    cargo run 144
-    ```
+### How it works
+
+- **`factorize`** (default): factorizes the number into primes (trial
+  division by the primes below 1000, Miller–Rabin primality tests and
+  Pollard's rho) and builds every divisor from the prime factors. The cost
+  depends on the size of the second-largest prime factor, not on the number
+  itself: a typical 39-digit number takes milliseconds. The hardest case is the
+  product of two primes of about 19 digits each, which takes around a minute.
+- **`trial`**: tests every candidate up to the square root, which is only
+  practical up to about 10^20. Kept for comparison.
+
+Both methods run on a pool of worker threads that splits the work into
+small batches; an idle worker takes pending batches from a busy one, so no
+core sits idle while work remains. Results are always in ascending order.
+
+Primality is proven for numbers below 3.317 × 10^24. Above that, the
+Miller–Rabin test uses the first 25 primes as bases; no composite below
+2^128 is known to pass them all.
 
 ## For Developers
 
-### Getting Started
+```bash
+cargo build --release
+cargo test                                # unit and CLI tests
+cargo test --release -- --include-ignored # plus the long-running tests
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+cargo deny check
+```
 
-To set up the development environment, you'll need to have Rust and Cargo installed.
+`rust-toolchain.toml` pins the toolchain used for formatting, linting and
+release builds, so local output matches CI.
 
-1.  **Install Rust and Cargo:** Follow the instructions on the official Rust website: [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
-2.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    ```
-3.  **Navigate to the project directory:**
-    ```bash
-    cd src/multiplication-product-validator
-    ```
-
-### Project Structure
-
-The project is a standard Cargo project:
+### Project structure
 
 ```
 .
-├── Cargo.toml  # Project manifest and dependencies
+├── Cargo.toml
 ├── src
-│   └── main.rs # Main application logic
-└── target      # Build artifacts
+│   ├── factor.rs   # Primality test and prime factorization
+│   ├── lib.rs      # Factor pairs, divisor generation, thread pool
+│   └── main.rs     # Command-line interface and CSV output
+└── tests
+    ├── cli.rs        # End-to-end tests of the binary
+    └── exhaustive.rs # Long-running tests (ignored by default)
 ```
 
-The main logic is in `src/main.rs`. It uses the `rayon` crate to parallelize the search for factors, making it efficient for large numbers.
+### Continuous integration
 
-### Building and Running
+| Workflow | When | What |
+|---|---|---|
+| `ci.yml` | push / PR to `main` | fmt, clippy, tests on Linux/macOS/Windows, rustdoc, release build, cargo-deny, MSRV |
+| `quality-nightly.yml` | daily | long-running tests, beta and nightly toolchains, advisory scan |
+| `codeql.yml` | push / PR / weekly | CodeQL for Rust and the workflows |
+| `release-plz.yml` | push to `main` | opens the release PR |
+| `release.yml` | signed `vX.Y.Z` tag | builds, attests and publishes the release |
 
-*   **To build the project:**
-    ```bash
-    cargo build
-    ```
-*   **To build in release mode (for performance):**
-    ```bash
-    cargo build --release
-    ```
-*   **To run the project:**
-    ```bash
-    cargo run <number>
-    ```
+Dependabot proposes Cargo and GitHub Actions updates weekly.
 
-### Testing
+### Releasing
 
-To run the tests for this project, you can use the following command:
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
-```bash
-cargo test
-```
-*(Note: No tests have been implemented yet.)*
+1. Merge the release PR opened by release-plz. It bumps the version in
+   `Cargo.toml` and adds the `CHANGELOG.md` entries.
+2. Sign and push the tag on the merge commit:
+
+   ```bash
+   git switch main && git pull
+   git tag -s vX.Y.Z -m 'release: vX.Y.Z'
+   git push origin vX.Y.Z
+   ```
+
+3. `release.yml` checks that the tag is signed by a key in
+   `.github/trusted-signers`, is on `main` and matches `Cargo.toml`, then
+   publishes the GitHub Release.
 
 ### Contributing
 
-Contributions are welcome! Please feel free to submit a pull request.
+1. Fork the repository and create a branch (`git switch -c feat/your-feature`).
+2. Make your changes, with tests.
+3. Commit using Conventional Commits and open a pull request.
 
-1.  Fork the repository.
-2.  Create a new branch (`git checkout -b feature/your-feature`).
-3.  Make your changes.
-4.  Commit your changes (`git commit -m 'Add some feature'`).
-5.  Push to the branch (`git push origin feature/your-feature`).
-6.  Open a pull request.
+## License
+
+[AGPL-3.0-only](LICENSE)
