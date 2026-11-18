@@ -21,3 +21,7 @@ git_release_enable = false
 # Tag format used by release.yml.
 git_tag_name = "v{{ version }}"
 pr_name = "chore(release): v{{ version }}"
+# Propose a release only for user-visible changes: features, fixes,
+# performance work and Cargo dependency updates (which change the shipped
+# binaries). Other commits still appear in the changelog of the next release.
+release_commits = "^(feat|fix|perf|deps)[(:!]"
