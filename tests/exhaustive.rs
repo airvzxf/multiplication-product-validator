@@ -57,3 +57,28 @@ fn random_products_of_three_values_up_to_2_pow_40() {
         check_factorization(n);
     }
 }
+
+/// Smallest prime at or above `n`.
+fn next_prime(mut n: u128) -> u128 {
+    while !is_prime(n) {
+        n += 1;
+    }
+    n
+}
+
+#[test]
+#[ignore = "slow; run by the quality-nightly workflow"]
+fn random_semiprimes_of_two_large_primes() {
+    // The hardest inputs for the factorization: two primes of 48 to 64 bits
+    // each, so neither trial division nor a short rho run can split them.
+    let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
+    for _ in 0..200 {
+        let p = next_prime(u128::from(rng.next() >> (rng.next() % 17)) | 1 << 47);
+        let q = next_prime(u128::from(rng.next() >> (rng.next() % 17)) | 1 << 47);
+        let mut expected = vec![(p.min(q), 1), (p.max(q), 1)];
+        if p == q {
+            expected = vec![(p, 2)];
+        }
+        assert_eq!(factorize(p * q), expected, "p={p} q={q}");
+    }
+}
