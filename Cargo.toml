@@ -10,6 +10,9 @@ readme = "README.md"
 keywords = ["factorization", "divisors", "multiplication", "cli"]
 categories = ["command-line-utilities", "mathematics"]
 publish = false
+# Only the files that make up the program. release-plz opens a release PR
+# only when one of these changes, so CI or tooling edits do not trigger one.
+include = ["/src/**", "/tests/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [dependencies]
 rayon = "1.12.0"
