@@ -11,12 +11,12 @@ on:
   workflow_dispatch:
 
 # Two runs at once would race to push the same release branch or open two
-# release PRs, so runs go one at a time. GitHub keeps only the newest
-# waiting run in a group; skipping the older one is harmless because each
-# run rebuilds the release PR from the whole history of main.
+# release PRs, so runs go one at a time. With queue: max every waiting run
+# keeps its turn instead of being cancelled.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
