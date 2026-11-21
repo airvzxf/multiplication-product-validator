@@ -23,5 +23,22 @@ git_tag_name = "v{{ version }}"
 pr_name = "chore(release): v{{ version }}"
 # Propose a release only for user-visible changes: features, fixes,
 # performance work and Cargo dependency updates (which change the shipped
-# binaries). Other commits still appear in the changelog of the next release.
+# binaries).
 release_commits = "^(feat|fix|perf|deps)[(:!]"
+
+[changelog]
+# Group commits by Conventional Commit type. CI, build, docs, test, style and
+# chore commits don't change the program, so they stay out of the changelog.
+# Groups are listed in alphabetical order.
+commit_parsers = [
+    { message = "^feat", group = "added" },
+    { message = "^changed", group = "changed" },
+    { message = "^deprecated", group = "deprecated" },
+    { message = "^removed", group = "removed" },
+    { message = "^fix", group = "fixed" },
+    { message = "^perf", group = "performance" },
+    { message = "^deps", group = "dependencies" },
+    { message = "^security", group = "security" },
+    { message = "^(ci|build|chore|docs|style|test)[(:!]", skip = true },
+    { message = "^.*", group = "other" },
+]
