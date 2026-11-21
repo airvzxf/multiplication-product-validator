@@ -1,11 +1,15 @@
 //! Prime factorization of `u128` values.
 //!
-//! Small factors are removed by trial division; what remains is split with
-//! Pollard's rho (Brent's variant) and checked with Miller–Rabin. All modular
-//! arithmetic on the large cofactor uses Montgomery multiplication, so no
-//! intermediate value ever needs more than 128 bits plus a carry.
+//! Small factors are removed by trial division and perfect powers are
+//! detected directly. What remains is split with a short run of Pollard's rho
+//! (Brent's variant), which finds small factors quickly, and then with the
+//! elliptic-curve method ([`ecm`]), whose curves run in parallel. Primality is
+//! checked with Miller–Rabin. All modular arithmetic on the large cofactor
+//! uses Montgomery multiplication, so no intermediate value ever needs more
+//! than 128 bits plus a carry.
 
-use rayon::prelude::*;
+mod ecm;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Primes below 1000, used for trial division and as Miller–Rabin bases.
@@ -213,10 +217,19 @@ pub fn is_prime(n: u128) -> bool {
     })
 }
 
+/// Rho cycle-length limit before handing over to ECM when only one thread
+/// is available. About 2^17 steps find any factor below roughly 2^34.
+const RHO_MAX_CYCLE: u64 = 1 << 16;
+
+/// Cycle-length limit of the rho run that precedes the rho/ECM race. About
+/// 2^13 steps (well under a millisecond) find any factor below roughly 2^24
+/// without paying ECM's setup cost.
+const RHO_HEAD_START: u64 = 1 << 12;
+
 /// Pollard's rho with Brent's cycle detection on the odd composite `n`,
 /// using `f(x) = x^2 + c`. Returns a non-trivial factor, or `None` if this
-/// `c` failed or `stop` was raised by another worker.
-fn pollard_brent(n: u128, c: u128, stop: &AtomicBool) -> Option<u128> {
+/// `c` failed, the cycle length exceeded `max_cycle`, or `stop` was raised.
+fn pollard_brent(n: u128, c: u128, max_cycle: u64, stop: &AtomicBool) -> Option<u128> {
     /// Differences multiplied together before each gcd.
     const BATCH: u64 = 128;
 
@@ -232,15 +245,22 @@ fn pollard_brent(n: u128, c: u128, stop: &AtomicBool) -> Option<u128> {
     let mut r: u64 = 1;
 
     while g == 1 {
-        if stop.load(Ordering::Relaxed) {
+        if r > max_cycle || stop.load(Ordering::Relaxed) {
             return None;
         }
         x = y;
-        for _ in 0..r {
+        for i in 0..r {
             y = step(y);
+            // Long cycles must not delay a stop raised by ECM.
+            if i % 4096 == 4095 && stop.load(Ordering::Relaxed) {
+                return None;
+            }
         }
         let mut k = 0;
         while k < r && g == 1 {
+            if k % 4096 == 0 && stop.load(Ordering::Relaxed) {
+                return None;
+            }
             ys = y;
             for _ in 0..BATCH.min(r - k) {
                 y = step(y);
@@ -265,23 +285,43 @@ fn pollard_brent(n: u128, c: u128, stop: &AtomicBool) -> Option<u128> {
     (g != n).then_some(g)
 }
 
-/// Finds a non-trivial factor of the odd composite `n`, trying several rho
-/// constants in parallel and keeping the first one that succeeds.
+/// Finds a non-trivial factor of the odd composite `n`, which has no factor
+/// below 1000 and is not a perfect power.
+///
+/// A short rho run goes first. After that, Pollard's rho is still faster for
+/// factors below about 2^38 and ECM above, so with several threads both
+/// race: rho on one thread, ECM curves on the rest, and the first factor
+/// found stops the other. With a single thread, a longer bounded rho run is
+/// followed by ECM.
 fn find_factor(n: u128) -> u128 {
-    let width = rayon::current_num_threads().max(1) as u128;
     let stop = AtomicBool::new(false);
-    let mut first = 1;
-    loop {
-        let found = (first..first + width).into_par_iter().find_map_any(|c| {
-            let factor = pollard_brent(n, c, &stop)?;
-            stop.store(true, Ordering::Relaxed);
-            Some(factor)
-        });
-        if let Some(factor) = found {
-            return factor;
-        }
-        first += width;
+    if let Some(factor) = pollard_brent(n, 1, RHO_HEAD_START, &stop) {
+        return factor;
     }
+    if rayon::current_num_threads() < 2 {
+        return pollard_brent(n, 2, RHO_MAX_CYCLE, &stop)
+            .or_else(|| ecm::find_factor(n, &stop))
+            .expect("ECM runs until it finds a factor unless stopped");
+    }
+    let (rho, ecm) = rayon::join(
+        || {
+            // A different constant than the head start, which already failed.
+            let factor = pollard_brent(n, 2, u64::MAX, &stop);
+            if factor.is_some() {
+                stop.store(true, Ordering::Relaxed);
+            }
+            factor
+        },
+        || {
+            let factor = ecm::find_factor(n, &stop);
+            if factor.is_some() {
+                stop.store(true, Ordering::Relaxed);
+            }
+            factor
+        },
+    );
+    rho.or(ecm)
+        .expect("ECM runs until it finds a factor unless rho found one")
 }
 
 /// Largest `r` with `r^k <= n`, for `k >= 2`.

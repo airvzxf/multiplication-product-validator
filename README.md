@@ -53,12 +53,16 @@ The CSV file has the columns `Multiplier,Multiplicand,Product`.
 
 ### How it works
 
-- **`factorize`** (default): factorizes the number into primes (trial
-  division by the primes below 1000, Miller–Rabin primality tests and
-  Pollard's rho) and builds every divisor from the prime factors. The cost
-  depends on the size of the second-largest prime factor, not on the number
-  itself: a typical 39-digit number takes milliseconds. The hardest case is the
-  product of two primes of about 19 digits each, which takes around a minute.
+- **`factorize`** (default): factorizes the number into primes and builds
+  every divisor from the prime factors. Factors below 1000 are removed by
+  trial division and perfect powers are detected directly. Each remaining
+  composite goes through a short run of Pollard's rho, which finds small
+  factors quickly. If that fails, rho keeps running on one thread while the
+  elliptic-curve method (ECM) tries independent curves on all the others,
+  and the first factor found stops the rest. Miller–Rabin tests primality.
+  Any number up to 2^128 − 1 takes well under a second. The hardest case,
+  the product of two primes of about 19 digits each, takes about 0.1 s on
+  8 threads.
 - **`trial`**: tests every candidate up to the square root, which is only
   practical up to about 10^20. Kept for comparison.
 
@@ -90,7 +94,9 @@ release builds, so local output matches CI.
 .
 ├── Cargo.toml
 ├── src
-│   ├── factor.rs   # Primality test and prime factorization
+│   ├── factor.rs   # Primality test, Pollard's rho, prime factorization
+│   ├── factor/
+│   │   └── ecm.rs  # Elliptic-curve method
 │   ├── lib.rs      # Factor pairs, divisor generation, thread pool
 │   └── main.rs     # Command-line interface and CSV output
 └── tests
