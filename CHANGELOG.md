@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/airvzxf/multiplication-product-validator/compare/v0.1.0...v0.1.1) - 2026-11-21
+
+### Performance
+
+- split large factors with the elliptic-curve method ([#7](https://github.com/airvzxf/multiplication-product-validator/pull/7))
+
 ## [0.1.0](https://github.com/airvzxf/multiplication-product-validator/releases/tag/v0.1.0) - 2026-11-17
 
 First release.
