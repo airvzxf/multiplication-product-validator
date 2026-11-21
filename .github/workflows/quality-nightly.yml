@@ -11,11 +11,6 @@ on:
     - cron: '0 4 * * *'
   workflow_dispatch:
 
-# Only the latest nightly window matters.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 

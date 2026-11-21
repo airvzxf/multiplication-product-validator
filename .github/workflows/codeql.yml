@@ -10,12 +10,6 @@ on:
     - cron: '32 14 * * 1'
   workflow_dispatch:
 
-# Queue runs in order instead of cancelling them, so every commit on main
-# keeps its result.
-concurrency:
-  group: codeql-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
-
 # `security-events: write` uploads the SARIF results to Code scanning.
 permissions:
   actions: read
